@@ -337,6 +337,11 @@ def thread_function(file, thread_index, debug=False):
 	if debug:
 		img.save("out.png")
 
+	if upper and lower:
+		open(file + "_bestBoiPosition.txt", "w") as dataOut:
+			dataOut.write(str(upper[0]) + "," + str(upper[1]))
+			dataOut.write(str(lower[0]) + "," + str(lower[1]))
+
 	#scaled = (upper / img.width, lower / img.height)
 	#thread_output[thread_index] = scaled # returns the value
 	thread_output[thread_index] = (upper, lower)  # returns the value
