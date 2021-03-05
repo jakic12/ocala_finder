@@ -8,6 +8,7 @@ import time
 import threading
 import subprocess as sp
 from multiprocessing import Process
+from pprint import pprint
 
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
@@ -43,14 +44,14 @@ def isEqualColor(c1, c2, epsilon = 30):
 # thank u Tom J Nowell
 def spural(size):
 	width, height = size
-
 	width -= 1
 	height -= 1
-
 	out = []
+	
 	x = y = 0
 	dx = 0
 	dy = -1
+
 	for i in range(max(width, height)**2):
 		if (-width/2 < x <= width/2) and (-height/2 < y <= height/2):
 			out.append((x + width//2, y + height//2))
@@ -58,23 +59,51 @@ def spural(size):
 			dx, dy = -dy, dx
 		x, y = x+dx, y+dy
 	return out
-	
-def filterWhitePixels(epsilon = 20, image=None, bmp=None):
-	# nobody ever reads this code
+
+class Spural:
+	def __init__(self, size = (0,0)):
+		self.width, self.height = size
+		self.width -= 1
+		self.height -= 1
+		self.x = self.y = 0
+		self.dx = 0
+		self.dy = -1
+		self.i = 0
+		self.i_max = max(self.width, self.height)**2;
+
+	def __iter__(self):
+		return self
+
+	def __next__(self):
+		output = None
+		while output == None:
+			if (-self.width/2 < self.x <= self.width/2) and (-self.height/2 < y <= self.height/2):
+				output = (self.x + self.width//2, self.y + self.height//2)
+			if self.x == self.y or (self.x < 0 and self.x == -self.y) or (self.x > 0 and self.x == 1-self.y):
+				self.dx, self.dy = -self.dy, self.dx
+			self.x, self.y = self.x+self.dx, self.y+self.dy
+		return output
+
+
+def filterWhitePixels(epsilon = 30, image=None, bmp=None):
+	whiteMask = [[False for j in range(image.size[1])] for i in range(image.size[0])]
+
 	for col in range(image.size[0]):
 		for row in range(image.size[1]):
 			if (isEqualColor(bmp[col, row], WHITE, epsilon=epsilon)):
 				bmp[col, row] = WHITE
+				whiteMask[col][row] = True
 			else:
-				# this comment will never be found
 				bmp[col, row] = BLACK
-	return image
+				whiteMask[col][row] = False
+
+	return whiteMask, image
 
 
-def findCircles(start=5, epsilon=10, comparisonEpsilon=30, image=None, bmp=None, imgPath="nopath", thread_id=-1):
+def findCircles(start=5, epsilon=10, whiteMask=None, imgPath="nopath", thread_id=-1):
 	circles = []
 	unfiltered = []
-	spural_arr = spural(image.size) # spural
+	spural_arr = spural((len(whiteMask),len(whiteMask[0]))) # spural
 	
 	
 	for i, coord in enumerate(spural_arr):
@@ -94,8 +123,8 @@ def findCircles(start=5, epsilon=10, comparisonEpsilon=30, image=None, bmp=None,
 
 				break
 
-		if isEqualColor(bmp[col, row], WHITE):
-			radius_range = isCircle((col, row), start, epsilon=epsilon, image=image, bmp=bmp)
+		if whiteMask[col][row]:
+			radius_range = isCircle((col, row), start, epsilon=epsilon, whiteMask=whiteMask);
 			if radius_range:
 				circles.append([col, row, radius_range])
 				#matchRing((col, row), radius_range[1], (0, 252, 0), epsilon=comparisonEpsilon)
@@ -108,26 +137,29 @@ def findCircles(start=5, epsilon=10, comparisonEpsilon=30, image=None, bmp=None,
 # print("Segmentation fault.")
 # exit(0) # easter egg
 
-def isCircle(center, start = 5, comparisonEpsilon = 30, epsilon = 10, limit = 100, image=None, bmp=None):
+def isCircle(center, start = 5, epsilon = 10, limit = 100, whiteMask = None):
 	start = start or 0
 	epsilon = epsilon or 10
 
 	radius_start = None
 	radius_end = start
 
-	if (not matchRing(center, radius_end, WHITE, epsilon=comparisonEpsilon, image=image, bmp=bmp)):
+	WHITE_BOOL = True
+	WHITE_BLACK = False
+
+	if (not matchRing(center, radius_end, WHITE_BOOL, whiteMask = whiteMask)):
 		return False
 
 	while (radius_end <= limit):
-		isBlack = matchRing(center, radius_end, BLACK, epsilon=comparisonEpsilon, image=image, bmp=bmp)
-		isWhite = matchRing(center, radius_end, WHITE, epsilon=comparisonEpsilon, image=image, bmp=bmp)
+		isBlack = matchRing(center, radius_end, WHITE_BLACK, whiteMask = whiteMask)
+		isWhite = matchRing(center, radius_end, WHITE_BOOL, whiteMask = whiteMask)
 
 		if (not (isWhite or isBlack) or isBlack ) and radius_start == None:
 			radius_start = radius_end
 			#radius_end = radius_start + epsilon
 			#break
 
-			if not matchRing(center, radius_start + epsilon, BLACK, epsilon=comparisonEpsilon, image=image, bmp=bmp):
+			if not matchRing(center, radius_start + epsilon, WHITE_BLACK, whiteMask = whiteMask):
 				return False
 
 		if isBlack:
@@ -135,7 +167,7 @@ def isCircle(center, start = 5, comparisonEpsilon = 30, epsilon = 10, limit = 10
 
 		radius_end += 1
 
-	isOuterBlack = matchRing(center, radius_end, BLACK, epsilon=comparisonEpsilon, image=image, bmp=bmp)
+	isOuterBlack = matchRing(center, radius_end, WHITE_BLACK, whiteMask = whiteMask)
 	
 	#if radius_end:
 	#	print(radius_end - radius_start)
@@ -146,20 +178,20 @@ def isCircle(center, start = 5, comparisonEpsilon = 30, epsilon = 10, limit = 10
 		return False
 
 
-def matchRing(center, r, color, epsilon=30, debug=False, image=None, bmp=None):
+def matchRing(center, r, color, epsilon=30, debug=False, bmp=None, whiteMask=None):
 	if (r == 0):
 		if (debug):
 			bmp[center[0], center[1]] = color
 			return
 		else:
-			return isEqualColor(bmp[center[0], center[1]], color, epsilon)
+			return whiteMask[center[0]][center[1]] == color
 	#increment = 0.001 # should be enough probably
 	increment = 1 / r # should be exact  probably
 	fi = 0
 	while (fi < 2*math.pi):
 		x = round(r * math.cos(fi) + center[0])
 		y = round(r * math.sin(fi) + center[1])
-		if (x < 0 or y < 0 or x >= image.size[0] or y >= image.size[1]):
+		if (whiteMask and (x < 0 or y < 0 or x >= len(whiteMask) or y >= len(whiteMask))):
 			return False
 
 		if (debug):
@@ -167,7 +199,7 @@ def matchRing(center, r, color, epsilon=30, debug=False, image=None, bmp=None):
 		else:
 			#if (colorDistance(bmp[x, y], color) >= epsilon): # might be px[y,x] (doesn't matter though)
 			# might be px[y,x] (doesn't matter though)
-			if not isEqualColor(bmp[x, y], color, epsilon):
+			if whiteMask[x][y] != color:
 				return False
 		fi += increment
 	return True
@@ -268,21 +300,28 @@ def thread_function(file, thread_index, debug=False):
 	#print("[" + str(thread_index) + "] DONE opening file (˘ε˘)")
 	
 	#print("[" + str(thread_index) + "] genewating bwack awnd white mask >.<")
-	img = filterWhitePixels(image=img, bmp=pixels)
+	whiteMask, img = filterWhitePixels(image=img, bmp=pixels)
 	#print("[" + str(thread_index) + "] DONE genewating bwack awnd white mask (ᵕᴗ ᵕ⁎)")
 
+	#//findPointOnImage((500,1000), bmp=pixels, color=GREEN, image=img, ringRadius=7)
+	#//findPointOnImage((500,1000), bmp=pixels, color=RED, image=img, ringRadius=24)
 	img.save(file + "_filter.png")
 	
 	#print("[" + str(thread_index) + "]")
-	circles = findCircles(image=img, bmp=pixels, imgPath=file, thread_id=thread_index)
+	circles = findCircles(whiteMask=whiteMask, thread_id=thread_index)
+
 
 	upper = None
 	lower = None
 
 	clusters = clusterize(circles)
+	#//print(thread_index, len(clusters), [len(c) for c in clusters])
 	prev = None
+
+
 	for cluster in clusters:
 		bestBoi = findBestFromCluster(cluster)
+		#//print(thread_index, bestBoi)
 		if prev:
 			if prev[1] > bestBoi[1]:
 				lower = prev[:2] # ignore the linter error, lp
@@ -352,8 +391,9 @@ def thread_monitor():
 def avgOfPair(arrOfPairs):
 	start = [0,0]
 	for pair in arrOfPairs:
-		start[0] += pair[0]
-		start[1] += pair[1]
+		if pair:
+			start[0] += pair[0]
+			start[1] += pair[1]
 	start[1] /= len(arrOfPairs)
 	start[0] /= len(arrOfPairs)
 	return start
@@ -367,7 +407,7 @@ def findPointOnImage(pos, bmp=None, image=None, color = RED, ringRadius = 10):
 		raise Exception("No image given òwó")
 		return;
 
-	matchRing(pos, ringRadius, color, debug=True, bmp=bmp, image=image)
+	matchRing(pos, ringRadius, color, debug=True, bmp=bmp)
 
 	# horizontal line
 	for y in range(image.size[1]):
@@ -398,6 +438,9 @@ pool_count = [0, math.ceil(len(files) / THREAD_COUNT)]
 
 watchdog = threading.Thread(target=thread_monitor, args=(), daemon=True) # daemons die when parent dies
 watchdog.start()
+
+thread_index = 0
+
 for i in range(0, pool_count[1]):
 	#print("DOING PAWTITION",i)
 	pool_count[0] = i
@@ -407,12 +450,13 @@ for i in range(0, pool_count[1]):
 
 	# spawn all threads
 	threads = []
-	for thread_index,file in enumerate(partition):
+	for _,file in enumerate(partition):
 		thread_output.append(None); # fill array with None values to avoid IndexOutOfBoundsException
 		thread_progress.append((0,0))
 		th = threading.Thread(target=thread_function, args=(file, thread_index), daemon=True)
 		th.start()
 		threads.append(th)
+		thread_index += 1;
 
 	# await all threads
 	for thread in threads:
