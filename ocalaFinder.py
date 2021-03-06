@@ -9,6 +9,7 @@ import threading
 import subprocess as sp
 from multiprocessing import Process
 from pprint import pprint
+import os.path
 
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
@@ -338,8 +339,8 @@ def thread_function(file, thread_index, debug=False):
 		img.save("out.png")
 
 	if upper and lower:
-		open(file + "_bestBoiPosition.txt", "w") as dataOut:
-			dataOut.write(str(upper[0]) + "," + str(upper[1]))
+		with open(file + "_bestBoiPosition.txt", "w") as dataOut:
+			dataOut.write(str(upper[0]) + "," + str(upper[1]) + "\n")
 			dataOut.write(str(lower[0]) + "," + str(lower[1]))
 
 	#scaled = (upper / img.width, lower / img.height)
@@ -363,7 +364,7 @@ def thread_monitor():
 		move_cursor(0,0)
 		time.sleep(0.5)
 
-		print("There is",str(pool_count[0]) + "/" + str(pool_count[1]),"(-(-_-(-_(-_(-_-)_-)-_-)_-)_-)-) asian amogus\n")
+		print("There is", str(pool_count[0]) + "/" + str(pool_count[1]), "(-(-_-(-_(-_(-_-)_-)-_-)_-)_-)-) asian amogus\n")
 
 		sum_done = 0
 		round_boys = 0
@@ -432,6 +433,7 @@ def pairApply(f,p):
 files = []
 for f in glob.glob("*"):
 	if f[-3:] == "jpg":
+		#path.exists(file + "_bestBoiPosition.txt")
 		files.append(f)
 
 print(files)
