@@ -1,15 +1,17 @@
 #!/usr/bin/python3
 
 import glob
+import os.path
+from os import sendfile, popen
 from PIL import Image
 import sys
 import math
 import time
 import threading
 import subprocess as sp
-from multiprocessing import Process
+from multiprocessing import Process, Manager, Value, Array
 from pprint import pprint
-import os.path
+from random import randint
 
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
@@ -23,24 +25,25 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+	HEADER = '\033[95m'
+	OKBLUE = '\033[94m'
+	OKCYAN = '\033[96m'
+	OKGREEN = '\033[92m'
+	WARNING = '\033[93m'
+	FAIL = '\033[91m'
+	ENDC = '\033[0m'
+	BOLD = '\033[1m'
+	UNDERLINE = '\033[4m'
 
 
 def colorDistance(c1, c2):
 	return math.sqrt(sum([(c1[i] - c2[i])**2 for i in range(3)]))
-#	return math.sqrt((c1[0] - c2[0])**2 + (c1[1] - c2[1])**2 + (c1[2] - c2[2])**2)
 
 def isEqualColor(c1, c2, epsilon = 30):
 	return colorDistance(c1, c2) < epsilon
 
+
+'''
 # https://stackoverflow.com/questions/398299/looping-in-a-spiral
 # thank u Tom J Nowell
 def spural(size):
@@ -60,7 +63,7 @@ def spural(size):
 			dx, dy = -dy, dx
 		x, y = x+dx, y+dy
 	return out
-
+'''
 class Spural:
 	def __init__(self, size = (0,0)):
 		self.width, self.height = size
@@ -77,13 +80,28 @@ class Spural:
 
 	def __next__(self):
 		output = None
+
 		while output == None:
-			if (-self.width/2 < self.x <= self.width/2) and (-self.height/2 < y <= self.height/2):
+			if self.i >= self.i_max: raise StopIteration
+			if (-self.width/2 < self.x <= self.width/2) and (-self.height/2 < self.y <= self.height/2):
 				output = (self.x + self.width//2, self.y + self.height//2)
 			if self.x == self.y or (self.x < 0 and self.x == -self.y) or (self.x > 0 and self.x == 1-self.y):
 				self.dx, self.dy = -self.dy, self.dx
 			self.x, self.y = self.x+self.dx, self.y+self.dy
+
+			self.i += 1
 		return output
+
+class iSpural:
+	def __init__(self, size = (0,0)):
+		self.spural = Spural(size)
+		
+	def __iter__(self):
+		return self
+
+	def __next__(self):
+		return (self.spural.i, self.spural.__next__())
+
 
 
 def filterWhitePixels(epsilon = 30, image=None, bmp=None):
@@ -101,18 +119,18 @@ def filterWhitePixels(epsilon = 30, image=None, bmp=None):
 	return whiteMask, image
 
 
-def findCircles(start=5, epsilon=10, whiteMask=None, imgPath="nopath", thread_id=-1):
+def findCircles(start=5, epsilon=20, whiteMask=None, thread_id=-1, thread_progress=None):
 	circles = []
 	unfiltered = []
-	spural_arr = spural((len(whiteMask),len(whiteMask[0]))) # spural
+	#spural_arr = spural((len(whiteMask),len(whiteMask[0]))) # spural
+	spural_len = len(whiteMask) * len(whiteMask[0]);
 	
-	
-	for i, coord in enumerate(spural_arr):
+	for i, coord in iSpural((len(whiteMask), len(whiteMask[0]))):
 		(col, row) = coord
 
 		# print percentage only once every N loops
-		if (i % int(len(spural_arr)//100)) == 0:
-			percentage = (100 * i) / len(spural_arr)
+		if (i % int(spural_len//100)) == 0:
+			percentage = (100 * i) / spural_len
 			thread_progress[thread_id] = (min(percentage * 10/7, 100), len(circles))
 			#print("[" + imgPath + "] -> ", str((round( 100 *(100 * i) / len(spural_arr)) / 100)) + "%", "@", len(circles), "roundy bois")
 			#print("=" * int(percentage) + ">" + "-" * int(100 - percentage))
@@ -138,6 +156,7 @@ def findCircles(start=5, epsilon=10, whiteMask=None, imgPath="nopath", thread_id
 # print("Segmentation fault.")
 # exit(0) # easter egg
 
+
 def isCircle(center, start = 5, epsilon = 10, limit = 100, whiteMask = None):
 	start = start or 0
 	epsilon = epsilon or 10
@@ -146,13 +165,17 @@ def isCircle(center, start = 5, epsilon = 10, limit = 100, whiteMask = None):
 	radius_end = start
 
 	WHITE_BOOL = True
-	WHITE_BLACK = False
+	BLACK_BOOL = False
 
-	if (not matchRing(center, radius_end, WHITE_BOOL, whiteMask = whiteMask)):
+	if not matchRing(center, radius_end, WHITE_BOOL, whiteMask = whiteMask):
+		return False
+
+	# if we are in a white patch
+	if matchRing(center, epsilon + start, WHITE_BOOL, whiteMask = whiteMask):
 		return False
 
 	while (radius_end <= limit):
-		isBlack = matchRing(center, radius_end, WHITE_BLACK, whiteMask = whiteMask)
+		isBlack = matchRing(center, radius_end, BLACK_BOOL, whiteMask = whiteMask)
 		isWhite = matchRing(center, radius_end, WHITE_BOOL, whiteMask = whiteMask)
 
 		if (not (isWhite or isBlack) or isBlack ) and radius_start == None:
@@ -160,7 +183,7 @@ def isCircle(center, start = 5, epsilon = 10, limit = 100, whiteMask = None):
 			#radius_end = radius_start + epsilon
 			#break
 
-			if not matchRing(center, radius_start + epsilon, WHITE_BLACK, whiteMask = whiteMask):
+			if not matchRing(center, radius_start + epsilon, BLACK_BOOL, whiteMask = whiteMask):
 				return False
 
 		if isBlack:
@@ -168,7 +191,7 @@ def isCircle(center, start = 5, epsilon = 10, limit = 100, whiteMask = None):
 
 		radius_end += 1
 
-	isOuterBlack = matchRing(center, radius_end, WHITE_BLACK, whiteMask = whiteMask)
+	isOuterBlack = matchRing(center, radius_end, BLACK_BOOL, whiteMask = whiteMask)
 	
 	#if radius_end:
 	#	print(radius_end - radius_start)
@@ -192,8 +215,16 @@ def matchRing(center, r, color, epsilon=30, debug=False, bmp=None, whiteMask=Non
 	while (fi < 2*math.pi):
 		x = round(r * math.cos(fi) + center[0])
 		y = round(r * math.sin(fi) + center[1])
-		if (whiteMask and (x < 0 or y < 0 or x >= len(whiteMask) or y >= len(whiteMask))):
+		if (whiteMask and (x < 0 or y < 0 or x >= len(whiteMask) or y >= len(whiteMask[0]))):
 			return False
+
+		'''
+x: (470, 505)
+y: (970, 1007)
+
+center: (487, 987)
+r: ~35
+		'''
 
 		if (debug):
 			bmp[x, y] = color
@@ -290,36 +321,51 @@ def getScale(upper, lower, wantedDistance):
 def getTranslation(upper, wantedCoords):
 	return (wantedCoords[0] - upper[0], wantedCoords[1] - upper[1])
 
-thread_output = []
-thread_progress = []
-def thread_function(file, thread_index, debug=False):
-	global thread_output;
+#thread_output = []
+#thread_progress = []
+#thread_output = [(Value('i', 0), Value('i', 0), Value('i', 0)) for i in range(THREAD_COUNT)]
+#thread_progress = [Value('i', 0) for i in range(THREAD_COUNT)]
+def thread_function(file, thread_index, thread_output, thread_progress, debug=False):
+	#global thread_output;
 
 	#print("[" + str(thread_index) + "] opening youw fiwe uwu :3", file)
 	img = Image.open(file).convert("RGB")
 	pixels = img.load()
 	#print("[" + str(thread_index) + "] DONE opening file (˘ε˘)")
-	
+
+	try:
+		with open(file + "_bestBoiPosition.txt") as f:
+			upper, lower = [pairApply(int, x.split(",")) for x in f.read().split("\n")]
+			thread_output[thread_index] = (upper, lower)
+			thread_progress[thread_index] = [100, "⌐■_■"]
+			# reminder:
+			#! Yᵒᵘ Oᶰˡʸ Lᶤᵛᵉ Oᶰᶜᵉ
+		return;
+	except Exception as e:
+		pass #? ¯\_(ツ)_/¯
+
 	#print("[" + str(thread_index) + "] genewating bwack awnd white mask >.<")
 	whiteMask, img = filterWhitePixels(image=img, bmp=pixels)
 	#print("[" + str(thread_index) + "] DONE genewating bwack awnd white mask (ᵕᴗ ᵕ⁎)")
 
 	#//findPointOnImage((500,1000), bmp=pixels, color=GREEN, image=img, ringRadius=7)
 	#//findPointOnImage((500,1000), bmp=pixels, color=RED, image=img, ringRadius=24)
-	img.save(file + "_filter.png")
 	
-	#print("[" + str(thread_index) + "]")
-	circles = findCircles(whiteMask=whiteMask, thread_id=thread_index)
-
+	#//print("[" + str(thread_index) + "]")
+	circles = findCircles(whiteMask=whiteMask, thread_id=thread_index, thread_progress=thread_progress)
 
 	upper = None
 	lower = None
+
+	# findPointOnImage(circles[0], pixels, img, RED, 25) 
+	
+	img.save(file + "_filter.png")
 
 	clusters = clusterize(circles)
 	#//print(thread_index, len(clusters), [len(c) for c in clusters])
 	prev = None
 
-
+	#//print("clusters: ",[clusters[i][0] for i in range(len(clusters))])
 	for cluster in clusters:
 		bestBoi = findBestFromCluster(cluster)
 		#//print(thread_index, bestBoi)
@@ -339,9 +385,10 @@ def thread_function(file, thread_index, debug=False):
 		img.save("out.png")
 
 	if upper and lower:
-		with open(file + "_bestBoiPosition.txt", "w") as dataOut:
-			dataOut.write(str(upper[0]) + "," + str(upper[1]) + "\n")
-			dataOut.write(str(lower[0]) + "," + str(lower[1]))
+		if not os.path.isfile(file + "_bestBoiPosition.txt"):
+			with open(file + "_bestBoiPosition.txt", "w") as f:
+				f.write(str(upper[0]) + "," + str(upper[1]) + "\n")
+				f.write(str(upper[0]) + "," + str(upper[1]))
 
 	#scaled = (upper / img.width, lower / img.height)
 	#thread_output[thread_index] = scaled # returns the value
@@ -351,47 +398,89 @@ def thread_function(file, thread_index, debug=False):
 def move_cursor(y, x):
 	print("\033[%d;%dH" % (y, x))
 
-pool_count = []
+def print_padded(*str, width = 0):
+	s = " ".join(str)
+	padding_len = max(width - len(s), 0)
+	padding = (' ' * padding_len) + '\n'
+	print(s, end=padding)
 
-def thread_monitor():
-	global thread_progress
+def getTerminalDimensions():
+	return pairApply(int, popen('stty size', 'r').read().split())
 
-	time.sleep(3) # wait for threads to initialise (just dont have a slow pc)
+def thread_monitor(thread_progress, pool_count, pool_index):
+	#global thread_progress
+	#global pool_count
+	#terminal_width = 85
+
+	terminal_height, terminal_width = getTerminalDimensions()
+
+	stars = ["✧", "*", "･", "ﾟ", "♡", ":", "☆", "ﾟ", ".", "･", "｡", "ﾟ"]
+	sky = [stars[randint(0,len(stars)-1)] for i in range(terminal_width)]
+
+	time.sleep(2) # wait for threads to initialise (just dont have a slow pc)
 	_ = sp.call('clear', shell=True)
 
 	while True:
-		#time.sleep(0.5)
-		move_cursor(0,0)
-		time.sleep(0.5)
+		time.sleep(2)
 
-		print("There is", str(pool_count[0]) + "/" + str(pool_count[1]), "(-(-_-(-_(-_(-_-)_-)-_-)_-)_-)-) asian amogus\n")
+		# update terminal sizerino
+		terminal_height, terminal_width = getTerminalDimensions()
+
+		move_cursor(0,0)
+
+		print_padded("There is",str(pool_index.value + 1) + "/" + str(pool_count),"(-(-_-(-_(-_(-_-)_-)-_-)_-)_-) asian amogus", width=terminal_width)
 
 		sum_done = 0
 		round_boys = 0
 
 		if len(thread_progress) == 0: continue
-
+		
+		
 		for i, perc in enumerate(thread_progress):
 			if not perc:
-				print("[%3d] sleeping... (◡ ω ◡)")
+				print_padded("[%3d] sleeping... (◡ ω ◡)" % i, width=terminal_width)
 				continue;
 
 			sum_done += perc[0]
-			round_boys += perc[1]
+			try:
+				round_boys += perc[1]
+			except:
+				pass #lp
 
 			flooerd_perc = int(perc[0])
-			print("[%3d] found %5d roundy boiz %3d%% %s" % (i, perc[1], flooerd_perc, ("█" * int(flooerd_perc // 2.5)) + ("░" * int((100 - flooerd_perc) // 2.5))))
+			print_padded("[%3d] found %5s roundy boiz %3d%% %s" % (
+				i,
+				str(perc[1]),
+				flooerd_perc,
+				("█" * round(flooerd_perc / 2.5)) + ("░" * round((100-flooerd_perc) / 2.5))
+			), width=terminal_width)
 			
-		sum_done = int(sum_done // len(thread_progress))
+		done_percent = int(sum_done // len(thread_progress))
 
 		ber = " ʕっ•ᴥ•ʔっ"
-		UwU = "(˘ε˘)"
-		stars = "✧･ﾟ: *✧･ﾟ♡ *♡･ﾟ✧*: ･ﾟ✧☆ﾟ.*･｡ﾟ~"
+		ber = bcolors.OKCYAN + ber + bcolors.ENDC
+		ber_len = 10; # len(ber) = 17 due to unprintable characters
+		UwU = "⊂(・▽・⊂)"
+		###### 123456789
+		UwU = bcolors.FAIL + UwU+ bcolors.ENDC
+		UwU_len = 9 # len(UwU) = 14 due to unprintable characters
+
 		print()
 		# ᴇʙᴏʟᴀ
-		print("[SUM] found %5d roundy boiz %3d%% %s" % (round_boys, sum_done, ("".join([stars[x % len(stars)] for x in range(sum_done//2)])) + bcolors.OKCYAN + ber + bcolors.ENDC + (" " * (100//2 - (sum_done//2) - len(ber))) + bcolors.FAIL + UwU+ bcolors.ENDC))
+		#stars_progressed = ("".join([stars[x % len(stars)] for x in range(sum_done//2)]))
+		max_space_count = max(terminal_width - ber_len - UwU_len, 0)
+		space_count = int(max_space_count * ((100-done_percent)/100))
+		stars_count = max_space_count - space_count
+		animation = "".join(sky[:stars_count]) + ber + (" " * space_count) + UwU
 
-		if sum_done >= 100:
+		print_padded("[SUM] found %5d roundy boiz %3d%% %s" % (
+			round_boys,
+			done_percent,
+			""#animation
+		), width=terminal_width)
+		print(animation)
+
+		if done_percent >= 100:
 			break
 
 def avgOfPair(arrOfPairs):
@@ -423,7 +512,7 @@ def findPointOnImage(pos, bmp=None, image=None, color = RED, ringRadius = 10):
 	for x in range(image.size[0]):
 		bmp[x, pos[1]] = color;
 
-	print("I AM ERROR ÙwÚ, NOTICE ME SENPAII", pos, image.size)
+	#print("I AM ERROR ÙwÚ, NOTICE ME SENPAII", pos, image.size)
 
 
 def pairApply(f,p):
@@ -433,21 +522,15 @@ def pairApply(f,p):
 files = []
 for f in glob.glob("*"):
 	if f[-3:] == "jpg":
-		#path.exists(file + "_bestBoiPosition.txt")
 		files.append(f)
 
+#files = files[:5]
+#//files = ["2020-03-18.jpg"]
 print(files)
 
 # COMMENT
 
-THREAD_COUNT = 4
-pool_count = [0, math.ceil(len(files) / THREAD_COUNT)]
-
-watchdog = threading.Thread(target=thread_monitor, args=(), daemon=True) # daemons die when parent dies
-watchdog.start()
-
-thread_index = 0
-
+'''
 for i in range(0, pool_count[1]):
 	#print("DOING PAWTITION",i)
 	pool_count[0] = i
@@ -458,9 +541,9 @@ for i in range(0, pool_count[1]):
 	# spawn all threads
 	threads = []
 	for _,file in enumerate(partition):
-		thread_output.append(None); # fill array with None values to avoid IndexOutOfBoundsException
-		thread_progress.append((0,0))
-		th = threading.Thread(target=thread_function, args=(file, thread_index), daemon=True)
+		#thread_output.append(None); # fill array with None values to avoid IndexOutOfBoundsException
+		#thread_progress.append((0,0))
+		th = Process(target=thread_function, args=(file, thread_index, thread_output, thread_progress), daemon=True)
 		th.start()
 		threads.append(th)
 		thread_index += 1;
@@ -468,14 +551,52 @@ for i in range(0, pool_count[1]):
 	# await all threads
 	for thread in threads:
 		thread.join();
+'''
 
+THREAD_COUNT = 99
+POOL_COUNT = math.ceil(len(files) / THREAD_COUNT)
+results = []
 
-# thread_output now contains all the clusters
+with Manager() as manager:
+	thread_index = 0
+	thread_output = manager.list([None for i in range(len(files))]);
+	thread_progress = manager.list([None for i in range(len(files))]);
+	pool_index = manager.Value('i', 0)
+
+	watchdog = Process(target=thread_monitor, args=(thread_progress, POOL_COUNT, pool_index), daemon=True) # daemons die when parent dies
+	watchdog.start()
+	
+	for i in range(0, POOL_COUNT):
+		#print("DOING PAWTITION",i)
+		pool_index.value = i
+		end = min((i+1)*THREAD_COUNT, len(files))
+		partition = files[i*THREAD_COUNT : end]
+		#print("GOING FWOM",i*THREAD_COUNT,"TO",end,"; PAWTITION:",partition)
+
+		# spawn all threads
+		threads = []
+		for _,file in enumerate(partition):
+			#thread_output.append(None); # fill array with None values to avoid IndexOutOfBoundsException
+			#thread_progress.append((0,0))
+			th = Process(target=thread_function, args=(file, thread_index, thread_output, thread_progress), daemon=True)
+			th.start()
+			threads.append(th)
+			thread_index += 1;
+
+		# await all threads
+		for thread in threads:
+			thread.join();
+
+	watchdog.terminate() # watchdog must also terminate
+
+	results = list(thread_output) # [x for x in thread_output]
+
+# results now contains all the clusters
 print("UwU aww my thweads awe done ଘ(੭ ˘ ᵕ˘)━☆ﾟ.*･｡ﾟᵕ꒳ᵕ~")
-pprint(thread_output)
+pprint(results)
 
-uppers = [x[0] for x in thread_output]
-lowers = [x[1] for x in thread_output]
+uppers = [x[0] for x in results]
+lowers = [x[1] for x in results]
 
 average_upper = avgOfPair(uppers)
 average_lower = avgOfPair(lowers)
@@ -493,8 +614,8 @@ avgSize = tuple(avgOfPair(sizes))
 
 # rotate, scale and translate
 for i,path in enumerate(files):
-	upper = thread_output[i][0]
-	lower = thread_output[i][1]
+	upper = results[i][0]
+	lower = results[i][1]
 	image = images[i]
 
 	scale = getScale(upper, lower, distance)
@@ -506,11 +627,6 @@ for i,path in enumerate(files):
 	relative_lower_pos = (lower[0] / image.size[0], lower[1] / image.size[1])
 	new_lower_pos = (relative_lower_pos[0] * new_size[0], relative_lower_pos[1] * new_size[1])
 
-	#print("target upper:", average_upper, "target lower:", average_lower)
-	#print("target distance:", distance)
-	#print("scale is",scale)
-	#print("new size is",new_size)
-
 	image = image.resize(new_size) # all problems begone (?)
 	image = image.crop((0, 0) + avgSize) # tuple addition is concatenation
 	image = image.rotate(getRotation(upper, lower),
@@ -518,12 +634,6 @@ for i,path in enumerate(files):
 	                    translate=getTranslation(new_upper_pos, average_upper))
 
 	pixels = image.load()
-	
-	#findPointOnImage(new_upper_pos, color=BLUE, bmp=pixels, image=image)
-	#findPointOnImage((new_upper_pos[0], new_upper_pos[1] + distance), color=GREEN, bmp=pixels, image=image)
-	#matchRing(new_upper_pos, distance, MAGENTA, image=image, bmp=pixels, debug=True)
-	#findPointOnImage(average_upper, color=RED, bmp=pixels, image=image)
-	#findPointOnImage(average_upper, color=CYAN, bmp=pixels, image=image)
 
 	image.save(str(i) + "_adj_" + path.split(".")[0] + ".png")
 
