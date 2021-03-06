@@ -388,7 +388,7 @@ def thread_function(file, thread_index, thread_output, thread_progress, debug=Fa
 		if not os.path.isfile(file + "_bestBoiPosition.txt"):
 			with open(file + "_bestBoiPosition.txt", "w") as f:
 				f.write(str(upper[0]) + "," + str(upper[1]) + "\n")
-				f.write(str(upper[0]) + "," + str(upper[1]))
+				f.write(str(lower[0]) + "," + str(lower[1]))
 
 	#scaled = (upper / img.width, lower / img.height)
 	#thread_output[thread_index] = scaled # returns the value
