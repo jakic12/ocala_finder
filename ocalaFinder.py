@@ -104,7 +104,7 @@ class iSpural:
 
 
 
-def filterWhitePixels(epsilon = 30, image=None, bmp=None):
+def filterWhitePixels(epsilon = 20, image=None, bmp=None):
 	whiteMask = [[False for j in range(image.size[1])] for i in range(image.size[0])]
 
 	for col in range(image.size[0]):
