@@ -521,7 +521,7 @@ def pairApply(f,p):
 
 files = []
 for f in glob.glob("*"):
-	if f[-3:] == "jpg":
+	if f[-3:] == "jpg" or f[-3:] == "png": # @%^magic_string@%^
 		files.append(f)
 
 #files = files[:5]
