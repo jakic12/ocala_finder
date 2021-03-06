@@ -1,4 +1,4 @@
-# How does it work
+# How it works
 
 If you want to generate your own timelapse from `ocala` images  
   
@@ -15,9 +15,7 @@ place the file `ocalaFinder.py` into the folder with your images and call
 
 If the program finds the two circles, it will cache their positions in the file  
 `<filename>_bestBoiPosition.txt`  
-So the next time you will run the program, it will ignore the cached files. If you want to force the search to all files,  
-  
-run
+So the next time you will run the program, it will ignore the cached files. If you want to force the search to all files, run:
 ```
 rm *_bestBoiPosition.txt
 ```  
