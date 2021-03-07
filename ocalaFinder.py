@@ -473,11 +473,11 @@ def thread_monitor(thread_progress, pool_count, pool_index):
 		stars_count = max_space_count - space_count
 		animation = "".join(sky[:stars_count]) + ber + (" " * space_count) + UwU
 
-		print_padded("[SUM] found %5d roundy boiz %3d%% %s" % (
+		print_padded("[SUM] found %5d roundy boiz %3d%%" % (
 			round_boys,
-			done_percent,
-			""#animation
+			done_percent
 		), width=terminal_width)
+		
 		print(animation)
 
 		if done_percent >= 100:
