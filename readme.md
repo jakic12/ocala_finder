@@ -1,3 +1,6 @@
+## Co-authored by [Yon Ploj](https://github.com/plojyon)  
+  
+  
 # How it works
 
 If you want to generate your own timelapse from `ocala` images  
